@@ -1,0 +1,85 @@
+#to run run_suite which runs learning_heap (21 cases)
+python run_suite.py \
+  --csv suite_compact.csv \
+  --data_root ./data \
+  --device cuda \
+  --epochs 30 \
+  --warmup 3 \
+  --pgd_steps 5
+
+#output explanation of run_suite
+[heap-B1000k-resnet18]  # ← tag for the run (mode-budget-model)
+mode=heap              # training mode
+model=resnet18         # backbone model
+budget=1000000         # PGD budget used for training
+clean=0.7029           # final clean test accuracy
+robust=0.3814          # final robust accuracy (PGD-20 eval)
+eff=0.0038             # efficiency score (robust acc ÷ pgd_calls, roughly)
+pgd_train=1000090      # total PGD calls consumed during training
+wall=1290.5s           # wall-clock runtime in seconds
+
+Cases:
+heap: Uses your heap-based sampling system (variants stored, scored, and reused).
+heap-burst: Same as heap, but “burst mode” locks onto the hardest current leaf for 300 steps in a row. This stresses the model on one cluster of adversarial variants before moving on.
+no_heap: Classic adversarial training. Every batch is generated fresh (no memory, no reuse).
+random_buffer: Keeps a buffer of past adversarial examples, samples randomly from it.
+fifo: First-in, first-out queue — oldest adversarial examples are reused first.
+
+testing resnet18/34 and mobilenet_v2
+tb is TRADES on is .3 and off is 0
+
+#For Budget_curve by thousands
+#300-500 PGD
+python budget_curve.py --device cuda --data_root ./data --model_name resnet18 \
+  --start_k 300 --end_k 500 --step_k 100 --pgd_steps 5 \
+  --heap_ratio 0.2 --global_heap_ratio 0.1 --focus_mode burst --burst_len 300 \
+  --initial_bank_size 3000 --out_dir ./budget_out_lb
+
+#600-700 PGD
+python budget_curve.py --device cuda --data_root ./data --model_name resnet18 \
+  --start_k 600 --end_k 700 --step_k 100 --pgd_steps 5 \
+  --heap_ratio 0.3 --global_heap_ratio 0.2 --focus_mode burst --burst_len 300 \
+  --initial_bank_size 3000 --out_dir ./budget_out_mid
+
+#800 PGD and above
+python budget_curve.py \
+  --device cuda \
+  --data_root ./data \
+  --model_name resnet18 \
+  --start_k 800 --end_k 1200 --step_k 100 \
+  --pgd_steps 5 \
+  --heap_ratio 0.4 --global_heap_ratio 0.3 \
+  --out_dir ./budget_out
+
+#to run AutoAttack and results
+python aa_eval.py \
+  --expdir_a heap-rat040_030-B1000k-resnet18 \
+  --expdir_b no_heap-B1000k-resnet18 \
+  --experiments_root ./experiments \
+  --device cuda \
+  --max_samples 1000 \
+  --out_dir ./aa_out
+
+  == AUTOEVAL (PGD-STYLE) ==
+A: heap-rat040_030-B1000k-resnet18_heap_20250820_205739  |  B: no_heap-B1000k-resnet18-tb0.3_no_heap_20250820_205033
+                 A (heap?)    B (baseline)
+Clean               70.90%          63.67%
+FGSM                64.94%          58.89%
+PGD-20              39.94%          35.64%
+PGD-50              40.14%          35.45%
+Wall(s)               12.4             8.4
+
+#to run transfer and results
+python transfer_batch.py \
+  --exp_root ./experiments \
+  --out_dir ./transfer_out \
+  --device cuda \
+  --steps 20 \
+  --max_batches 0
+Best runs per (mode, model):
+  ('fifo', 'resnet18') -> fifo-B1000k-resnet18_fifo_20250820_224807 | robust=0.3236
+  ('heap', 'resnet18') -> heap-rat040_030-B1000k-resnet18_heap_20250820_205739 | robust=0.3892
+  ('heap', 'resnet34') -> heap-B1000k-resnet34_heap_20250820_225617 | robust=0.3803
+  ('no_heap', 'resnet18') -> no_heap-B1000k-resnet18-tb0.3_no_heap_20250820_205033 | robust=0.3510
+  ('no_heap', 'resnet34') -> no_heap-B1000k-resnet34_no_heap_20250820_232528 | robust=0.3259
+  ('random_buffer', 'resnet18') -> random_buffer-B1000k-resnet18_random_buffer_20250820_174157 | robust=0.3215
